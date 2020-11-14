@@ -1,73 +1,46 @@
 from selenium import webdriver
-#from selenium.webdriver.common.keys import Keys
-import time
-from utility_methods.utility_methods import *
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.firefox.options import Options
+import time, os, traceback, requests, logging
 import urllib.request
-import os
-
+from utility_methods.utility_methods import *
+from random import randint
+from datetime import datetime
 
 class InstaBot:
-
     def __init__(self, username=None, password=None):
-        """"
-        Creates an instance of InstaBot class.
-
-        Args:
-            username:str: The username of the user, if not specified, read from configuration.
-            password:str: The password of the user, if not specified, read from configuration.
-
-        Attributes:
-            driver_path:str: Path to the chromedriver.exe
-            driver:str: Instance of the Selenium Webdriver (chrome 72) 
-            login_url:str: Url for logging into IG.
-            nav_user_url:str: Url to go to a users homepage on IG.
-            get_tag_url:str: Url to go to search for posts with a tag on IG.
-            logged_in:bool: Boolean whether current user is logged in or not.
-        """
-
+        options = Options()
+        options.headless = True
         self.username = config['IG_AUTH']['USERNAME']
         self.password = config['IG_AUTH']['PASSWORD']
-
         self.login_url = config['IG_URLS']['LOGIN']
         self.nav_user_url = config['IG_URLS']['NAV_USER']
         self.get_tag_url = config['IG_URLS']['SEARCH_TAGS']
-
-        self.driver = webdriver.Chrome(config['ENVIRONMENT']['CHROMEDRIVER_PATH'])
-
+        self.driver = webdriver.Firefox(options=options,executable_path=config['ENVIRONMENT']['FIREFOXDRIVER_PATH'])
         self.logged_in = False
 
+    def waiting(self,a=2,b=6):
+        _temp = randint(a,b)
+        time.sleep(_temp)
 
-    @insta_method
+    
     def login(self):
-        """
-        Logs a user into Instagram via the web portal
-        """
-
         self.driver.get(self.login_url)
-
-        login_btn = self.driver.find_element_by_xpath('//*[@id="react-root"]/section/main/div/article/div/div[1]/div/form/div[3]') # login button xpath changes after text is entered, find first
+        self.waiting(5,9)
+        login_btn = self.driver.find_element_by_xpath('//*[@id="loginForm"]/div/div[3]/button/div') # login button xpath changes after text is entered, find first
 
         username_input = self.driver.find_element_by_name('username')
         password_input = self.driver.find_element_by_name('password')
 
         username_input.send_keys(self.username)
         password_input.send_keys(self.password)
+        self.waiting()
         login_btn.click()
+        self.telegram_bot_sendtext('log in')
+        self.waiting(4,7)
 
 
-    @insta_method
-    def search_tag(self, tag):
-        """
-        Naviagtes to a search for posts with a specific tag on IG.
-
-        Args:
-            tag:str: Tag to search for
-        """
-
-        self.driver.get(self.get_tag_url.format(tag))
-
-
-    @insta_method
+    
     def nav_user(self, user):
         """
         Navigates to a users profile page
@@ -77,167 +50,88 @@ class InstaBot:
         """
 
         self.driver.get(self.nav_user_url.format(user))
-
-
-    @insta_method
-    def follow_user(self, user):
-        """
-        Follows user(s)
-
-        Args:
-            user:str: Username of the user to follow
-        """
-
-        self.nav_user(user)
-
-        follow_buttons = self.find_buttons('Follow')
-
-        for btn in follow_buttons:
-            btn.click()
-
-    
-    @insta_method
-    def unfollow_user(self, user):
-        """
-        Unfollows user(s)
-
-        Args:
-            user:str: Username of user to unfollow
-        """
-
-        self.nav_user(user)
-
-        unfollow_btns = self.find_buttons('Following')
-
-        if unfollow_btns:
-            for btn in unfollow_btns:
-                btn.click()
-                unfollow_confirmation = self.find_buttons('Unfollow')[0]
-                unfollow_confirmation.click()
-        else:
-            print('No {} buttons were found.'.format('Following'))
+        self.waiting()
     
 
-    @insta_method
-    def download_user_images(self, user):
-        """
-        Downloads all images from a users profile.
-
-        """
     
-        self.nav_user(user)
-
-        img_srcs = []
-        finished = False
-        while not finished:
-
-            finished = self.infinite_scroll() # scroll down
-
-            img_srcs.extend([img.get_attribute('src') for img in self.driver.find_elements_by_class_name('FFVAD')]) # scrape srcs
-
-        img_srcs = list(set(img_srcs)) # clean up duplicates
-
-        for idx, src in enumerate(img_srcs):
-            self.download_image(src, idx, user)
-    
-
-    @insta_method
-    def like_latest_posts(self, user, n_posts, like=True):
-        """
-        Likes a number of a users latest posts, specified by n_posts.
-
-        Args:
-            user:str: User whose posts to like or unlike
-            n_posts:int: Number of most recent posts to like or unlike
-            like:bool: If True, likes recent posts, else if False, unlikes recent posts
-
-        TODO: Currently maxes out around 15.
-        """
-
-        action = 'Like' if like else 'Unlike'
-
-        self.nav_user(user)
-
-        imgs = []
-        imgs.extend(self.driver.find_elements_by_class_name('_9AhH0'))
-
-        for img in imgs[:n_posts]:
-            img.click() 
-            time.sleep(1) 
+    def like_latest_posts(self, users,comments):
+        error_counter = success_counter = 1
+        last_user = None
+        for user in users:
+            self.nav_user(user)
             try:
-                self.driver.find_element_by_xpath("//*[@aria-label='{}']".format(action)).click()
+                last_user = user
+                url_post = self.driver.find_element_by_xpath('//div[@class="v1Nh3 kIKUG  _bz0w"]/a')
+                #GRAP THE POST URL AND GO
+                self.driver.get(url_post.get_attribute('href'))
+                #like post
+                self.like_post()
+                self.comment_post(comments[randint(0,len(comments)-1)])
+                #counting successfull processing
+                success_counter += 1
+                self.waiting(4,11)
+
+
             except Exception as e:
-                print(e)
+                last_user_index = users.index(user)
 
-            #self.comment_post('beep boop testing bot')
-            self.driver.find_elements_by_class_name('ckWGn')[0].click()
+                updated_users_list = users[last_user_index+1:]
+                with open(config['FILE_PATH']['FILE_PATH_LOCATION'],'w') as f:
+                    f.writelines('')
+                    for elem in updated_users_list:
+                        f.writelines(str(elem)+'\n')
+                #telegram notifier
+                #msg = '[{0}] is private account or no posts yet detected'.format(user)
+                #self.telegram_bot_sendtext(msg)
+
+                #screenshoot
+                now = datetime.now().strftime("%m_%d_%Y_%H_%M_%S__")
+                screenshoots_path = 'screenshoots/'+ now + str(user)+'.png'
+                print(screenshoots_path)
+                self.driver.save_screenshot(screenshoots_path)
+                logging.warning(traceback.format_exc())
+                logging.warning('failed-----------------------')
+                #counting failed processing
+                error_counter += 1
+
+            finally:
+                #counting all processing
+                counter = error_counter + success_counter
+                if counter % 2 == 0:
+                    self.telegram_bot_sendtext('''
+[{0:.1f}] in total
+[{1:.1f}] succeded 
+[{2:.1f}] failed
+[{3:.1f} %] success rate
+[{4:.1f} %] fail rate '''.format(counter,success_counter,error_counter,((success_counter/(success_counter+error_counter))*100),((error_counter/(success_counter+error_counter))*100)))
+
+        self.telegram_bot_sendtext('all users have been processed')
+        logging.info('all users have been processed')
+        self.driver.close()
+            
 
 
-    #@insta_method
-    #def comment_post(self, text):
-        #"""
-        #Comments on a post that is in modal form
-        #"""
-
-        #comment_input = self.driver.find_elements_by_class_name('Ypffh')[0]
-        #comment_input.click()
-        #comment_input.send_keys(text)
-        #comment_input.send_keys(Keys.Return)
-
-        #print('Commentd.')
-
-
-    def download_image(self, src, image_filename, folder):
+    
+    def comment_post(self, text):
         """
-        Creates a folder named after a user to to store the image, then downloads the image to the folder.
+        Comments on a post that is in modal form
         """
+        self.waiting()
+        self.driver.find_element_by_xpath('//textarea[contains(@class,"Ypffh")]').click()
+        self.driver.find_element_by_xpath('//textarea[contains(@class,"Ypffh")]').send_keys(text,Keys.ENTER)
 
-        folder_path = './{}'.format(folder)
-        if not os.path.exists(folder_path):
-            os.mkdir(folder_path)
+    def like_post(self):
+        self.waiting(2,4)
+        self.driver.find_element_by_xpath('//section[@class="ltpMr Slqrh"]/span[1]/button').click()
 
-        img_filename = 'image_{}.jpg'.format(image_filename)
-        urllib.request.urlretrieve(src, '{}/{}'.format(folder, img_filename))
+    def telegram_bot_sendtext(self,bot_message):
+        bot_token = '1322367173:AAFdwlgfWPG8UnU8EbVrVuDFs1SUdMIGfbo'
+        bot_chatID = '-453306470'
+        send_text = 'https://api.telegram.org/bot' + bot_token + '/sendMessage?chat_id=' + bot_chatID + '&parse_mode=Markdown&text=' + bot_message
 
+        response = requests.get(send_text)
 
-    def infinite_scroll(self):
-        """
-        Scrolls to the bottom of a users page to load all of their media
-
-        Returns:
-            bool: True if the bottom of the page has been reached, else false
-
-        """
-
-        SCROLL_PAUSE_TIME = 1
-
-        self.last_height = self.driver.execute_script("return document.body.scrollHeight")
-
-        self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-
-        time.sleep(SCROLL_PAUSE_TIME)
-
-        self.new_height = self.driver.execute_script("return document.body.scrollHeight")
-
-
-        if self.new_height == self.last_height:
-            return True
-
-        self.last_height = self.new_height
-        return False
-
-
-    def find_buttons(self, button_text):
-        """
-        Finds buttons for following and unfollowing users by filtering follow elements for buttons. Defaults to finding follow buttons.
-
-        Args:
-            button_text: Text that the desired button(s) has 
-        """
-
-        buttons = self.driver.find_elements_by_xpath("//*[text()='{}']".format(button_text))
-
-        return buttons
+        return response.json()
 
 
 if __name__ == '__main__':
@@ -247,7 +141,25 @@ if __name__ == '__main__':
     config = init_config(config_file_path)
     logger = get_logger(logger_file_path)
 
+    #logging setup
+    logging.basicConfig(filename='bot.log',
+                            filemode='a+',
+                            format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
+                            datefmt='%H:%M:%S',
+                            level=logging.WARNING)
+
+    with open(config['FILE_PATH']['FILE_PATH_LOCATION']) as f:
+        content = f.readlines()
+    users = [x.strip() for x in content]
+
+    comments = ['Collab ?dm @azarioo_off 🎁 ❤️',
+                'Collab? dm @azarioo_off🎁❤️',
+                'Collab ?dm @azarioo_off 🎁 ❤️',
+                'Collab? dm @azarioo_off🎁 ❤️',
+                'Collab with us? dm @azarioo_off 🎁❤️',
+                'Collab? dm @azarioo_off 🎁 ❤️ 👍',
+                'Collab ?dm @azarioo_off 🎁 👍 ❤️']
+
     bot = InstaBot()
     bot.login()
-
-    bot.like_latest_posts('johngfisher', 2, like=True)
+    bot.like_latest_posts(users,comments)
